@@ -1,0 +1,23 @@
+CREATE DATABASE ecom;
+USE ecom;
+
+CREATE TABLE products (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(255),
+  category VARCHAR(255),
+  brand VARCHAR(255),
+  price DECIMAL(10,2),
+  color VARCHAR(100),
+  storage VARCHAR(100),
+  material VARCHAR(100),
+  rating DECIMAL(2,1),
+  image VARCHAR(255)
+  -- Add other fields as needed
+);
+ CREATE INDEX idx_products_brand ON products_clean(brand(100));
+CREATE INDEX idx_products_category ON products_clean(category(100));
+CREATE INDEX idx_products_price ON products_clean(price);
+CREATE INDEX idx_products_color ON products_clean(color(100));
+CREATE INDEX idx_products_material ON products_clean(material(100));
+CREATE INDEX idx_products_category_brand ON products_clean(category(100), brand(100));
+ALTER TABLE products_clean ADD FULLTEXT idx_fulltext_name_desc (name, description);
