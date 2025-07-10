@@ -41,81 +41,178 @@ const upload = multer({ dest: 'uploads/' }); // Files will be stored in 'uploads
 // - Pagination (page, pageSize)
 //
 app.get('/api/products', (req, res) => {
-  // Extract query parameters for filtering, search, sorting, and pagination
   const {
-    search,      // Search term for full-text search
-    brand,       // Filter by brand
-    category,    // Filter by category
-    price_min,   // Minimum price
-    price_max,   // Maximum price
-    sort_by = 'id',      // Sort column (default: id)
-    sort_order = 'asc',  // Sort order (asc/desc)
-    page = 1,            // Page number (default: 1)
-    pageSize = 12        // Items per page (default: 12)
+    search,
+    brand,
+    category,
+    price_min,
+    price_max,
+    sort_by = 'id',
+    sort_order = 'asc',
+    page = 1,
+    pageSize = 66,
+    color,
+    material
   } = req.query;
 
-  let where = [];   // Array to build WHERE conditions
-  let params = [];  // Array for parameterized query values
+  let where = [];
+  let params = [];
 
-  // Filtering by brand
   if (brand) {
-    where.push('brand = ?');
-    params.push(brand);
+    const brands = brand.split(',');
+    if (brands.length > 1) {
+      where.push(`brand IN (${brands.map(() => '?').join(',')})`);
+      params.push(...brands);
+    } else {
+      where.push('brand = ?');
+      params.push(brand);
+    }
   }
-  // Filtering by category
   if (category) {
-    where.push('category = ?');
-    params.push(category);
+    const categories = category.split(',');
+    if (categories.length > 1) {
+      where.push(`category IN (${categories.map(() => '?').join(',')})`);
+      params.push(...categories);
+    } else {
+      where.push('category = ?');
+      params.push(category);
+    }
   }
-  // Filtering by minimum price
+  if (color) {
+    const colors = color.split(',');
+    if (colors.length > 1) {
+      where.push(`(${colors.map(() => 'LOWER(TRIM(color)) = ?').join(' OR ')})`);
+      params.push(...colors.map(c => c.trim().toLowerCase()));
+    } else {
+      where.push('LOWER(TRIM(color)) = ?');
+      params.push(color.trim().toLowerCase());
+    }
+  }
+  if (material) {
+    const materials = material.split(',');
+    if (materials.length > 1) {
+      where.push(`(${materials.map(() => 'LOWER(TRIM(material)) = ?').join(' OR ')})`);
+      params.push(...materials.map(m => m.trim().toLowerCase()));
+    } else {
+      where.push('LOWER(TRIM(material)) = ?');
+      params.push(material.trim().toLowerCase());
+    }
+  }
   if (price_min) {
     where.push('price >= ?');
     params.push(Number(price_min));
   }
-  // Filtering by maximum price
   if (price_max) {
     where.push('price <= ?');
     params.push(Number(price_max));
   }
 
-  // Full-text search and LIKE search on multiple fields
+  // LIKE-based search for compatibility (without description)
   if (search) {
     where.push('(' +
-      'MATCH(name, description) AGAINST (? IN NATURAL LANGUAGE MODE) OR ' +
+      'name LIKE ? OR ' +
       'brand LIKE ? OR ' +
       'material LIKE ? OR ' +
       'category LIKE ?' +
     ')');
-    // Add search term for full-text and LIKE queries
-    params.push(search, `%${search}%`, `%${search}%`, `%${search}%`);
+    params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
   }
 
-  // Build WHERE clause for SQL query
   const whereClause = where.length ? 'WHERE ' + where.join(' AND ') : '';
-
-  // Validate and set sorting column and direction
   const allowedSort = ['id', 'name', 'price', 'brand', 'category'];
   const sortCol = allowedSort.includes(sort_by) ? sort_by : 'id';
   const sortDir = sort_order.toLowerCase() === 'desc' ? 'DESC' : 'ASC';
-
-  // Pagination: calculate LIMIT and OFFSET
   const limit = Math.max(1, parseInt(pageSize));
   const offset = (Math.max(1, parseInt(page)) - 1) * limit;
 
-  // Main SQL query to fetch products
-  const sql = `
-    SELECT * FROM products_clean
-    ${whereClause}
-    ORDER BY ${sortCol} ${sortDir}
-    LIMIT ? OFFSET ?
-  `;
-  // Add pagination params
-  params.push(limit, offset);
+  const countSql = `SELECT COUNT(*) as count FROM products_clean ${whereClause}`;
+  db.query(countSql, params, (err, countResult) => {
+    if (err) {
+      console.error('SQL error in countSql:', err);
+      return res.status(500).json({ error: err.code + ': ' + err.message });
+    }
+    const totalCount = countResult[0].count;
 
-  // Execute query and return results as JSON
-  db.query(sql, params, (err, results) => {
-    if (err) return res.status(500).json({ error: err });
-    res.json(results);
+    const facetQueries = [
+      new Promise((resolve, reject) => {
+        db.query(`SELECT brand as value, COUNT(*) as count FROM products_clean ${whereClause} GROUP BY brand`, params, (err, rows) => {
+          if (err) reject(err); else resolve(rows);
+        });
+      }),
+      new Promise((resolve, reject) => {
+        db.query(`SELECT category as value, COUNT(*) as count FROM products_clean ${whereClause} GROUP BY category`, params, (err, rows) => {
+          if (err) reject(err); else resolve(rows);
+        });
+      }),
+      new Promise((resolve, reject) => {
+        db.query(`SELECT color as value, COUNT(*) as count FROM products_clean ${whereClause} GROUP BY color`, params, (err, rows) => {
+          if (err) reject(err); else resolve(rows);
+        });
+      }),
+      new Promise((resolve, reject) => {
+        db.query(`SELECT material as value, COUNT(*) as count FROM products_clean ${whereClause} GROUP BY material`, params, (err, rows) => {
+          if (err) reject(err); else resolve(rows);
+        });
+      })
+    ];
+
+    const allFacetQueries = [
+      new Promise((resolve, reject) => {
+        db.query('SELECT DISTINCT brand FROM products_clean', [], (err, rows) => {
+          if (err) reject(err); else resolve(rows.map(r => r.brand));
+        });
+      }),
+      new Promise((resolve, reject) => {
+        db.query('SELECT DISTINCT category FROM products_clean', [], (err, rows) => {
+          if (err) reject(err); else resolve(rows.map(r => r.category));
+        });
+      }),
+      new Promise((resolve, reject) => {
+        db.query('SELECT DISTINCT color FROM products_clean', [], (err, rows) => {
+          if (err) reject(err); else resolve(rows.map(r => r.color));
+        });
+      }),
+      new Promise((resolve, reject) => {
+        db.query('SELECT DISTINCT material FROM products_clean', [], (err, rows) => {
+          if (err) reject(err); else resolve(rows.map(r => r.material));
+        });
+      })
+    ];
+
+    Promise.all(facetQueries).then(([brands, categories, colors, materials]) => {
+      Promise.all(allFacetQueries).then(([allBrands, allCategories, allColors, allMaterials]) => {
+        const sql = `
+          SELECT * FROM products_clean
+          ${whereClause}
+          ORDER BY ${sortCol} ${sortDir}
+          LIMIT ? OFFSET ?
+        `;
+        db.query(sql, [...params, limit, offset], (err, results) => {
+          if (err) {
+            console.error('SQL error in main product query:', err);
+            return res.status(500).json({ error: err.code + ': ' + err.message });
+          }
+          res.json({
+            products: results,
+            totalCount,
+            brands,
+            categories,
+            colors,
+            materials,
+            allBrands,
+            allCategories,
+            allColors,
+            allMaterials
+          });
+        });
+      }).catch(err => {
+        console.error('SQL error in allFacetQueries:', err);
+        res.status(500).json({ error: 'Database error (all facets): ' + err.message });
+      });
+    }).catch(err => {
+      console.error('SQL error in facetQueries:', err);
+      res.status(500).json({ error: 'Database error (facets): ' + err.message });
+    });
   });
 });
 
@@ -133,6 +230,16 @@ app.get('/api/products/:id', (req, res) => {
   });
 });
 
+// Diagnostic endpoint to check table columns
+app.get('/api/products/diagnose', (req, res) => {
+  db.query('DESCRIBE products_clean', [], (err, results) => {
+    if (err) {
+      console.error('SQL error in diagnose:', err);
+      return res.status(500).json({ error: err.code + ': ' + err.message });
+    }
+    res.json({ columns: results });
+  });
+});
 
 // Start the server on port 5000
 app.listen(5000, () => console.log('Server running on port 5000'));
