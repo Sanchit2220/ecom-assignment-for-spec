@@ -5,17 +5,21 @@ const mysql = require('mysql2'); // MySQL client for Node.js
 const multer = require('multer'); // Middleware for handling file uploads
 const csv = require('csv-parser'); // For parsing CSV files (not used in current code)
 const fs = require('fs'); // File system module (not used in current code)
+const dotenv = require('dotenv'); // For environment variables
 
 const app = express();
 app.use(cors()); // Allow requests from other origins (frontend)
 app.use(express.json()); // Parse incoming JSON requests
+app.use('/uploads', express.static('uploads')); // Serve static files from the 'uploads' directory
+
+dotenv.config(); // Load .env file
 
 // MySQL connection configuration
 const db = mysql.createConnection({
-  host: 'localhost', // Database host
-  user: 'root',      // MySQL username
-  password: 'root',  // MySQL password
-  database: 'ecom'   // Database name
+  host: process.env.DB_HOST, // Database host
+  user: process.env.DB_USER,      // MySQL username
+  password: process.env.DB_PASSWORD,  // MySQL password
+  database: process.env.DB_NAME   // Database name
 });
 
 // Connect to MySQL and log status
